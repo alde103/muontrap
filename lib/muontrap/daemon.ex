@@ -24,6 +24,7 @@ defmodule MuonTrap.Daemon do
   the following additions:
 
   * `:name` - Name the Daemon GenServer.
+  * `:controlling_process` - when set, it notifies the output from the command to the process by sending a message.
   * `:msg_callback` - When set, it sends the output from the command to the callback. Only funtions with /1 arity are allowed.
   * `:log_output` - When set, it sends the output from the command to the Logger. Specify the log level (e.g., `:debug`).
   * `:log_prefix` - Prefix each log message with this string (defaults to the program's path).
@@ -40,7 +41,15 @@ defmodule MuonTrap.Daemon do
   defmodule State do
     @moduledoc false
 
-    defstruct [:command, :port, :cgroup_path, :log_output, :log_prefix, :msg_callback]
+    defstruct [
+      :command,
+      :port,
+      :cgroup_path,
+      :log_output,
+      :log_prefix,
+      :msg_callback,
+      :controlling_process
+    ]
   end
 
   def child_spec([command, args]) do
@@ -108,6 +117,7 @@ defmodule MuonTrap.Daemon do
        command: command,
        port: port,
        cgroup_path: Map.get(options, :cgroup_path),
+       controlling_process: Map.get(options, :controlling_process),
        msg_callback: Map.get(options, :msg_callback),
        log_output: Map.get(options, :log_output),
        log_prefix: Map.get(options, :log_prefix, command <> ": ")
@@ -143,8 +153,14 @@ defmodule MuonTrap.Daemon do
   @impl true
   def handle_info(
         {port, {:data, {_, message}}},
-        %State{port: port, log_output: nil, msg_callback: msg_callback} = state
+        %State{
+          port: port,
+          log_output: nil,
+          msg_callback: msg_callback,
+          controlling_process: c_pid
+        } = state
       ) do
+    notify_msg_to_controlling_process(c_pid, message)
     dispatch_message(msg_callback, message)
     {:noreply, state}
   end
@@ -184,4 +200,8 @@ defmodule MuonTrap.Daemon do
 
   defp dispatch_message(nil, _message), do: :ok
   defp dispatch_message(msg_callback, message), do: msg_callback.(message)
+  defp notify_msg_to_controlling_process(nil, _message), do: :ok
+
+  defp notify_msg_to_controlling_process(controlling_process_pid, message),
+    do: send(controlling_process_pid, {:daemon_output, message})
 end

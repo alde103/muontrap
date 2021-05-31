@@ -119,6 +119,9 @@ defmodule MuonTrap.Options do
     end
   end
 
+  defp validate_option(:daemon, {:controlling_process, c_pid}, opts) when is_pid(c_pid),
+    do: Map.put(opts, :controlling_process, c_pid)
+
   # MuonTrap common options
   defp validate_option(_any, {:cgroup_controllers, controllers}, opts) when is_list(controllers),
     do: Map.put(opts, :cgroup_controllers, controllers)

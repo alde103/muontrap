@@ -81,9 +81,9 @@ defmodule DaemonTest do
     fun = fn ->
       {:ok, _pid} = start_supervised(daemon_spec("echo", ["hello"], name: UnhandledMsg))
 
-      wait_for_close_check()
-
       send(UnhandledMsg, "this is an unhandled msg")
+
+      wait_for_close_check()
       Logger.flush()
     end
 
@@ -100,6 +100,23 @@ defmodule DaemonTest do
     end
 
     assert capture_log(fun) =~ "msg_callback echo says: hello"
+  end
+
+  test "daemon doesn't notify a controlling_process with incomming messages by default" do
+    {:ok, _pid} = start_supervised(daemon_spec("echo", ["hello from unhandled daemon"]))
+
+    wait_for_close_check()
+
+    refute_received {:daemon_output, "hello from unhandled daemon"}, 100
+  end
+
+  test "daemon notifies a controlling_process with incomming messages" do
+    {:ok, _pid} =
+      start_supervised(daemon_spec("echo", ["hello from daemon"], controlling_process: self()))
+
+    wait_for_close_check()
+
+    assert_received {:daemon_output, "hello from daemon"}, 100
   end
 
   test "can pass environment variables to the daemon" do

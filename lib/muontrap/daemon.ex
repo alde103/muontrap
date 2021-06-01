@@ -168,16 +168,25 @@ defmodule MuonTrap.Daemon do
   @impl true
   def handle_info(
         {port, {:data, {_, message}}},
-        %State{port: port, log_output: log_level, log_prefix: prefix, msg_callback: msg_callback} =
-          state
+        %State{
+          port: port,
+          log_output: log_level,
+          log_prefix: prefix,
+          msg_callback: msg_callback,
+          controlling_process: c_pid
+        } = state
       ) do
     Logger.log(log_level, [prefix, message])
+    notify_msg_to_controlling_process(c_pid, message)
     dispatch_message(msg_callback, message)
     {:noreply, state}
   end
 
   @impl true
-  def handle_info({port, {:exit_status, status}}, %State{port: port} = state) do
+  def handle_info(
+        {port, {:exit_status, status}},
+        %State{port: port, controlling_process: c_pid} = state
+      ) do
     reason =
       case status do
         0 ->
@@ -188,6 +197,8 @@ defmodule MuonTrap.Daemon do
           Logger.error("#{state.command}: Process exited with status #{status}")
           :error_exit_status
       end
+
+    notify_exit_to_controlling_process(c_pid, reason, status)
 
     {:stop, reason, state}
   end
@@ -200,8 +211,14 @@ defmodule MuonTrap.Daemon do
 
   defp dispatch_message(nil, _message), do: :ok
   defp dispatch_message(msg_callback, message), do: msg_callback.(message)
+
   defp notify_msg_to_controlling_process(nil, _message), do: :ok
 
   defp notify_msg_to_controlling_process(controlling_process_pid, message),
     do: send(controlling_process_pid, {:daemon_output, message})
+
+  defp notify_exit_to_controlling_process(nil, _reason, _status), do: :ok
+
+  defp notify_exit_to_controlling_process(controlling_process_pid, reason, status),
+    do: send(controlling_process_pid, {:daemon_exit, reason, status})
 end

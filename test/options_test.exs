@@ -76,6 +76,12 @@ defmodule MuonTrap.OptionsTest do
     |> Kernel.==(&inspect/1)
     |> assert()
 
+    :daemon
+    |> Options.validate("echo", [], msg_callback: nil)
+    |> Map.get(:msg_callback)
+    |> is_nil()
+    |> assert()
+
     assert Map.get(
              Options.validate(:daemon, "echo", [], controlling_process: self()),
              :controlling_process

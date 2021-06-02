@@ -237,7 +237,7 @@ defmodule MuonTrap.Daemon.Server do
         else
           _error ->
             msg = """
-            There are no arguments to spawn the daemon, please add the `daemon_args` in #{
+            There are no arguments for the daemon, please add the `daemon_args` key in your state #{
               inspect(user_state)
             }
             """

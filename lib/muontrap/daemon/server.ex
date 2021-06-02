@@ -286,8 +286,6 @@ defmodule MuonTrap.Daemon.Server do
   end
 
   # Runs callbacks
-  @spec run((term -> {:ok, term()} | {:stop, term(), term()}), State.t()) ::
-          {:noreply, State.t()} | {:stop, term(), State.t()}
   defp run(callback, %State{user_state: user_state} = state) do
     case callback.(user_state) do
       {:ok, user_state} ->

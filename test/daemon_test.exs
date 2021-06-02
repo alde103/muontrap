@@ -102,21 +102,64 @@ defmodule DaemonTest do
     assert capture_log(fun) =~ "msg_callback echo says: hello"
   end
 
-  test "daemon doesn't notify a controlling_process with incomming messages by default" do
+  test "daemon doesn't notify a controlling_process with incomming messages or exit event by default" do
     {:ok, _pid} = start_supervised(daemon_spec("echo", ["hello from unhandled daemon"]))
 
     wait_for_close_check()
 
     refute_received {:daemon_output, "hello from unhandled daemon"}, 100
+    refute_received {:daemon_exit, :normal, 0}, 100
   end
 
-  test "daemon notifies a controlling_process with incomming messages" do
+  test "daemon notifies a controlling_process with incomming messages and exit event" do
     {:ok, _pid} =
       start_supervised(daemon_spec("echo", ["hello from daemon"], controlling_process: self()))
 
     wait_for_close_check()
 
-    assert_received {:daemon_output, "hello from daemon"}, 100
+    assert_received {:daemon_output, "hello from daemon"}
+    assert_received {:daemon_exit, :normal, 0}
+  end
+
+  test "daemon notifies a controlling_process with error exit status" do
+    tempfile = Path.join("test", "tmp-permanent_deamon")
+    _ = File.rm(tempfile)
+    my_pid = self()
+
+    log =
+      capture_log(fn ->
+        {:ok, _pid} =
+          start_supervised(
+            Supervisor.child_spec(
+              {Daemon,
+               [
+                 test_path("succeed_second_time.test"),
+                 [tempfile],
+                 [log_output: :error, controlling_process: my_pid]
+               ]},
+              restart: :permanent,
+              id: :test_daemon
+            )
+          )
+
+        # Give it time to restart a few times.
+        Process.sleep(500)
+
+        stop_supervised(:test_daemon)
+
+        Logger.flush()
+      end)
+
+    _ = File.rm(tempfile)
+
+    assert log =~ "Called 0 times"
+    assert log =~ "Called 1 times"
+    assert log =~ "Called 2 times"
+
+    assert_received {:daemon_output, "Called 0 times"}
+    assert_received {:daemon_output, "Called 1 times"}
+    assert_received {:daemon_output, "Called 2 times"}
+    assert_received {:daemon_exit, :error_exit_status, 1}
   end
 
   test "can pass environment variables to the daemon" do

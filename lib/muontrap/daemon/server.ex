@@ -4,22 +4,72 @@ defmodule MuonTrap.Daemon.Server do
   require Logger
 
   @moduledoc """
-  This module implements a behaviour that wraps `MuonTrap.Daemon` for easy handling daemon messages with a GenServer state e.g:
+  This module implements a behaviour that wraps `MuonTrap.Daemon` for handling daemon messages with GenServer states e.g:
 
-  ```
+  ```elixir
   defmodule MyDaemon do
-    use MuonTrap.Daemon.Server
     alias MuonTrap.Daemon
+    use Daemon.Server, restart: :transient
 
-    def start_link(args) do
-      Daemon.Server.start_link(__MODULE__, args)
+    def start_link(user_init_state) do
+      Daemon.Server.start_link(__MODULE__, user_init_state)
+    end
+
+    def stop(pid) do
+      Daemon.Server.stop(pid)
     end
 
     @impl MuonTrap.Daemon.Server
-    def handle_daemon(_message, _daemon_pid, state) do
+    def init(%{parent_pid: p_pid} = user_init_state) do
+      # initialize your process state. Your state must include ´daemon_args´,
+      # which must correspond to the arguments of ´MuonTrap.Daemon.start_link´.
+      send(p_pid, {self(), :init, user_init_state})
+      {:ok, user_init_state}
+    end
+
+    @impl MuonTrap.Daemon.Server
+    def handle_daemon(message, daemon_pid, %{parent_pid: p_pid} = state) do
+      # Do something with the daemon message.
+      send(p_pid, {self(), :handle_daemon, daemon_pid, message})
       {:ok, state}
     end
+
+    @impl MuonTrap.Daemon.Server
+    def handle_failure(exit_status, %{parent_pid: p_pid} = state) do
+      # Do something with unexpected daemon failures.
+      send(p_pid, {self(), :handle_failure, exit_status})
+      {:ok, state}
+    end
+
+    @impl MuonTrap.Daemon.Server
+    def handle_exit(%{parent_pid: p_pid} = state) do
+      # Do something with expected daemon exit.
+      send(p_pid, {self(), :handle_exit})
+      {:ok, state}
+    end
+
+    @impl MuonTrap.Daemon.Server
+    def terminate(:normal, %{parent_pid: p_pid} = _state) do
+      send(p_pid, {self(), :terminated})
+      :ok
+    end
+
+    def terminate(_reason, %{parent_pid: p_pid} = _state) do
+      send(p_pid, {self(), :badexit})
+      :ok
+    end
   end
+  ```
+  The previous example sends messages of daemon events to a parent process
+  and can be executed with the following example:
+
+  ```elixir
+  iex(1)> initial_state = %{parent_pid: self(), daemon_args: ["echo", ["hello from MyDaemon"]]}
+  iex(2)> {:ok, s_pid} = MyDaemon.start_link(initial_state)
+  iex(3)> flush()
+  {#PID<0.313.0>, :init, %{daemon_args: ["echo", ["hello from MyDaemon"]], parent_pid: #PID<0.209.0>}}
+  {#PID<0.313.0>, :handle_daemon, #PID<0.315.0>, "hello from MyDaemon"}
+  {#PID<0.313.0>, :handle_exit}
   ```
   """
 
@@ -99,7 +149,7 @@ defmodule MuonTrap.Daemon.Server do
         require Logger
 
         msg = """
-        There are no arguments to spawn the daemon, please add the `daemon_args` in #{
+        There are no arguments for the daemon, please add the `daemon_args` key in your state #{
           inspect(user_init_args)
         }
         """
@@ -160,6 +210,11 @@ defmodule MuonTrap.Daemon.Server do
     GenServer.start_link(__MODULE__, [module, args], options)
   end
 
+  @doc false
+  def start(module, args, options \\ []) do
+    GenServer.start(__MODULE__, [module, args], options)
+  end
+
   @doc """
   Stops the `MuonTrap.Daemon` given optional `reason` and `timeout`.
   """
@@ -205,9 +260,9 @@ defmodule MuonTrap.Daemon.Server do
     {:noreply, %{state | daemon_pid: d_pid}}
   end
 
-  def handle_continue({:start_daemon, daemon_args}, %State{} = state) do
+  def handle_continue({:start_daemon, [cmd_bin, cmd_args, daemon_args]}, %State{} = state) do
     {:ok, d_pid} =
-      apply(MuonTrap.Daemon, :start_link, daemon_args ++ [controlling_process: self()])
+      MuonTrap.Daemon.start_link(cmd_bin, cmd_args, daemon_args ++ [controlling_process: self()])
 
     {:noreply, %{state | daemon_pid: d_pid}}
   end
